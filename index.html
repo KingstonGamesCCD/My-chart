@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Child's Play: The Stage</title>
+    <style>
+        :root { --enemy-color: #ff3e3e; --player-color: #00e5ff; }
+        body { 
+            background: #e5e0d8; /* Pale Wall Color */
+            color: #333; 
+            font-family: 'Segoe UI', sans-serif; 
+            margin: 0; 
+            overflow: hidden; 
+        }
+
+        /* Initial Setup Overlay */
+        #setup-screen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85); z-index: 1000;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            color: white;
+        }
+        #setup-screen textarea { width: 50%; height: 150px; background: #111; color: #0f0; border: 1px solid #444; margin: 20px; border-radius: 5px; }
+
+        /* Small Red and Blue Boxes */
+        #ui-header {
+            position: absolute; top: 10px; width: 100%;
+            display: flex; justify-content: center; gap: 20px; z-index: 500;
+        }
+        .info-box { padding: 5px 15px; border-radius: 4px; font-weight: bold; color: white; font-size: 14px; text-transform: uppercase; }
+        .enemy-box { background: var(--enemy-color); box-shadow: 0 2px 10px rgba(255,0,0,0.3); }
+        .player-box { background: var(--player-color); box-shadow: 0 2px 10px rgba(0,229,255,0.3); }
+
+        /* The Stage Container */
+        #game-stage {
+            display: none; height: 100vh; width: 100vw;
+            flex-direction: column; align-items: center;
+        }
+
+        /* Floor/Stage */
+        #floor {
+            position: absolute; bottom: 0; width: 100%; height: 40vh;
+            background: #5d4037; /* Brown Wooden Floor */
+            border-top: 10px solid #3e2723;
+            z-index: 1;
+        }
+
+        /* Hit Zones */
+        .track-container {
+            display: flex; width: 800px; height: 100%; position: relative; z-index: 2;
+        }
+        .side-track { flex: 1; position: relative; }
+        
+        .hit-line {
+            position: absolute; top: 100px; width: 90%; left: 5%; height: 4px;
+            background: rgba(255,255,255,0.8); z-index: 100;
+            box-shadow: 0 0 15px white;
+        }
+
+        .scroll-area { position: absolute; top: 0; width: 100%; height: 100%; }
+
+        /* Notes */
+        .note {
+            position: absolute; width: 18%; height: 40px;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: bold; font-size: 22px; border-radius: 3px;
+        }
+        .e-note { border: 2px solid var(--enemy-color); color: var(--enemy-color); background: rgba(0,0,0,0.5); }
+        .p-note { border: 2px solid var(--player-color); color: var(--player-color); background: rgba(0,0,0,0.5); }
+
+        /* Animations */
+        .hit { animation: hitAnim 0.2s ease-out forwards; }
+        @keyframes hitAnim { 0% { transform: scale(1); filter: brightness(3); } 100% { transform: scale(1.4); opacity: 0; } }
+        .miss { opacity: 0.2; transform: translateY(30px); transition: 0.3s; }
+
+        .start-btn { padding: 10px 30px; background: #333; color: white; border: none; cursor: pointer; border-radius: 5px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div id="setup-screen">
+        <h2>LOAD CHART DATA</h2>
+        <textarea id="chart-input" placeholder="Paste JSON here..."></textarea>
+        <button class="start-btn" onclick="initStage()">INITIALIZE STAGE</button>
+    </div>
+
+    <div id="ui-header">
+        <div class="info-box enemy-box">Enemy</div>
+        <div class="info-box player-box">Player</div>
+    </div>
+
+    <div id="game-stage">
+        <div class="track-container">
+            <div class="side-track" id="enemy-track">
+                <div class="hit-line"></div>
+                <div class="scroll-area" id="enemy-scroll"></div>
+            </div>
+            <div class="side-track" id="player-track">
+                <div class="hit-line"></div>
+                <div class="scroll-area" id="player-scroll"></div>
+            </div>
+        </div>
+        <div id="floor"></div>
+    </div>
+
+    <audio id="bgm" src="Child's Play V2.mp3"></audio>
+
+    <script>
+        const bgm = document.getElementById('bgm');
+        const pScroll = document.getElementById('player-scroll');
+        const eScroll = document.getElementById('enemy-scroll');
+        let activeNotes = [];
+        let isPlaying = false;
+        const scrollSpeed = 4.5; // Slightly faster for gameplay feel
+
+        function initStage() {
+            const input = document.getElementById('chart-input').value;
+            if(!input) return alert("Please paste chart data!");
+
+            try {
+                const chartData = JSON.parse(input);
+                document.getElementById('setup-screen').style.display = 'none';
+                document.getElementById('game-stage').style.display = 'flex';
+
+                chartData.forEach((note, index) => {
+                    const el = document.createElement('div');
+                    el.className = `note ${note.type === 'p' ? 'p-note' : 'e-note'}`;
+                    el.innerText = note.c;
+                    
+                    const topPos = note.t * 100 * scrollSpeed;
+                    el.style.top = topPos + "px";
+                    
+                    // Lane math: 0-3 for enemy, 4-7 for player
+                    const laneIndex = note.type === 'p' ? (note.l - 4) : note.l;
+                    el.style.left = (laneIndex * 25) + "%";
+
+                    if(note.type === 'p') pScroll.appendChild(el);
+                    else eScroll.appendChild(el);
+                    
+                    activeNotes.push({ ...note, element: el, hit: false });
+                });
+
+                // Auto-start music
+                setTimeout(() => {
+                    bgm.play();
+                    isPlaying = true;
+                    update();
+                }, 1000);
+
+            } catch(e) {
+                alert("Error loading JSON. Make sure it's copied correctly!");
+            }
+        }
+
+        function update() {
+            if (!isPlaying) return;
+            const now = bgm.currentTime;
+            const hitZoneTop = 100;
+            const scrollPos = now * 100 * scrollSpeed;
+
+            pScroll.style.transform = `translateY(${hitZoneTop - scrollPos}px)`;
+            eScroll.style.transform = `translateY(${hitZoneTop - scrollPos}px)`;
+
+            activeNotes.forEach(n => {
+                if(!n.hit) {
+                    // Enemy auto-hit logic
+                    if(n.type === 'e' && now >= n.t) {
+                        n.hit = true;
+                        n.element.classList.add('hit');
+                    }
+                    // Player miss logic
+                    if(n.type === 'p' && now > parseFloat(n.t) + 0.15) {
+                        n.hit = true;
+                        n.element.classList.add('miss');
+                    }
+                }
+            });
+
+            requestAnimationFrame(update);
+        }
+
+        window.onkeydown = (e) => {
+            if(!isPlaying) return;
+            const keyMap = { 'ArrowLeft': 4, 'ArrowUp': 5, 'ArrowDown': 6, 'ArrowRight': 7 };
+            const lane = keyMap[e.key];
+
+            if(lane) {
+                const now = bgm.currentTime;
+                // Detect hit
+                const note = activeNotes.find(n => 
+                    n.type === 'p' && 
+                    n.l === lane && 
+                    Math.abs(n.t - now) < 0.15 && 
+                    !n.hit
+                );
+
+                if(note) {
+                    note.hit = true;
+                    note.element.classList.add('hit');
+                }
+            }
+        };
+    </script>
+</body>
+</html>
